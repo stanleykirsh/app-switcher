@@ -37,13 +37,13 @@
     </key>
 
     <key name="thumbnail-width" type="i">
-      <default>280</default>
+      <default>336</default>
       <summary>Thumbnail width</summary>
       <description>Requested preview width in logical pixels.</description>
     </key>
 
     <key name="thumbnail-height" type="i">
-      <default>180</default>
+      <default>216</default>
       <summary>Thumbnail height</summary>
       <description>Requested preview height in logical pixels.</description>
     </key>

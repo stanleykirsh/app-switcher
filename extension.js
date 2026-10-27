@@ -50,7 +50,7 @@ class WindowSwitcherPopup extends St.Widget {
             x_align: Clutter.ActorAlign.CENTER,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        this._container.spacing = 12;
+        this._container.spacing = 14;
         this._container.layout_manager.orientation = Clutter.Orientation.VERTICAL;
 
         this._grid = new St.Widget({
@@ -63,8 +63,8 @@ class WindowSwitcherPopup extends St.Widget {
             orientation: Clutter.Orientation.HORIZONTAL,
             homogeneous: false,
         });
-        flowLayout.column_spacing = 16;
-        flowLayout.row_spacing = 16;
+        flowLayout.column_spacing = 20;
+        flowLayout.row_spacing = 20;
         this._grid.layout_manager = flowLayout;
 
         this._container.add_child(this._grid);
@@ -178,14 +178,14 @@ class WindowSwitcherPopup extends St.Widget {
         this._items = [];
         this._selectedIndex = -1;
 
-        const maxThumbWidth = Math.floor(global.stage.width * 0.25);
-        const maxThumbHeight = Math.floor(global.stage.height * 0.25);
+        const maxThumbWidth = Math.floor(global.stage.width * 0.30);
+        const maxThumbHeight = Math.floor(global.stage.height * 0.30);
 
-        this._thumbWidth = Math.max(160, Math.min(this._settings.get_int('thumbnail-width'), maxThumbWidth));
-        this._thumbHeight = Math.max(100, Math.min(this._settings.get_int('thumbnail-height'), maxThumbHeight));
+        this._thumbWidth = Math.max(192, Math.min(this._settings.get_int('thumbnail-width'), maxThumbWidth));
+        this._thumbHeight = Math.max(120, Math.min(this._settings.get_int('thumbnail-height'), maxThumbHeight));
 
-        this._itemWidth = this._thumbWidth + 24;
-        this._itemHeight = this._thumbHeight + 64;
+        this._itemWidth = this._thumbWidth + 28;
+        this._itemHeight = this._thumbHeight + 76;
 
         const tracker = Shell.WindowTracker.get_default();
 
@@ -199,7 +199,7 @@ class WindowSwitcherPopup extends St.Widget {
             const itemLayout = new Clutter.BoxLayout({
                 orientation: Clutter.Orientation.VERTICAL,
             });
-            itemLayout.spacing = 8;
+            itemLayout.spacing = 10;
             item.layout_manager = itemLayout;
 
             item.set_size(this._itemWidth, this._itemHeight);
@@ -219,13 +219,13 @@ class WindowSwitcherPopup extends St.Widget {
                 x_align: Clutter.ActorAlign.CENTER,
                 width: this._thumbWidth,
             });
-            titleBox.spacing = 8;
+            titleBox.spacing = 10;
             titleBox.layout_manager.orientation = Clutter.Orientation.HORIZONTAL;
 
             let iconActor = null;
             try {
                 const app = tracker.get_window_app(win);
-                if (app) iconActor = app.create_icon_texture(24);
+                if (app) iconActor = app.create_icon_texture(28);
             } catch (e) {
                 iconActor = null;
             }
@@ -233,7 +233,7 @@ class WindowSwitcherPopup extends St.Widget {
             if (!iconActor) {
                 iconActor = new St.Icon({
                     icon_name: 'application-x-executable',
-                    icon_size: 24,
+                    icon_size: 28,
                     style_class: 'alttab-app-icon',
                 });
             }
@@ -244,7 +244,7 @@ class WindowSwitcherPopup extends St.Widget {
             });
             title.clutter_text.ellipsize = Pango.EllipsizeMode.END;
             title.clutter_text.line_wrap = false;
-            title.width = Math.max(48, this._thumbWidth - 44);
+            title.width = Math.max(56, this._thumbWidth - 52);
 
             titleBox.add_child(iconActor);
             titleBox.add_child(title);
@@ -283,7 +283,7 @@ class WindowSwitcherPopup extends St.Widget {
     }
 
     _createThumbnail(win) {
-        const fallbackIconSize = Math.min(96, Math.floor(this._thumbHeight / 2));
+        const fallbackIconSize = Math.min(116, Math.floor(this._thumbHeight / 2));
 
         try {
             const windowActor = win.get_compositor_private();
@@ -327,15 +327,12 @@ class WindowSwitcherPopup extends St.Widget {
     }
 
     _updateLayoutWidth() {
-        const spacing = 16;
-        const containerPadding = 48;
+        const spacing = 20;
+        const containerPadding = 56;
         const maxTotalWidth = Math.floor(global.stage.width * 0.92);
         const availableGridWidth = maxTotalWidth - containerPadding;
 
-        // Максимум колонок, которые помещаются по ширине
         const maxAvailableCols = Math.max(1, Math.floor((availableGridWidth + spacing) / (this._itemWidth + spacing)));
-
-        // Ограничиваем 8 колонками максимум (Windows-style)
         const hardMaxCols = Math.min(8, this._items.length);
         const maxCols = Math.min(maxAvailableCols, hardMaxCols);
 
@@ -343,17 +340,13 @@ class WindowSwitcherPopup extends St.Widget {
         let rows;
 
         if (this._items.length <= maxCols) {
-            // Всё помещается в один ряд — приоритет горизонтальному расположению
             columns = this._items.length;
             rows = 1;
         } else {
-            // Нужно несколько рядов. Для Windows-style предпочтительно 2-3 ряда.
-            // Пробуем уместить в 2 ряда
             columns = Math.ceil(this._items.length / 2);
             columns = Math.min(columns, maxCols);
             rows = Math.ceil(this._items.length / columns);
             
-            // Если всё равно больше 3 рядов, увеличиваем число колонок
             if (rows > 3) {
                 columns = maxCols;
                 rows = Math.ceil(this._items.length / columns);
