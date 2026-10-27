@@ -535,6 +535,7 @@ class WindowSwitcherPopup extends St.Widget {
 
 export default class AltTabWindowsExtension extends Extension {
     enable() {
+        log('AppSwitcher: enabling extension');
         this._settings = this.getSettings();
         this._popup = null;
         this._savedSystemKeybindings = new Map();
@@ -552,8 +553,9 @@ export default class AltTabWindowsExtension extends Extension {
                 Shell.ActionMode.NORMAL,
                 () => this._showPopup(false)
             );
+            log('AppSwitcher: forward keybinding added');
         } catch (e) {
-            logError(e, 'AltTabWindows: failed to bind forward keybinding');
+            logError(e, 'AppSwitcher: failed to bind forward keybinding');
         }
 
         try {
@@ -564,21 +566,39 @@ export default class AltTabWindowsExtension extends Extension {
                 Shell.ActionMode.NORMAL,
                 () => this._showPopup(true)
             );
+            log('AppSwitcher: backward keybinding added');
         } catch (e) {
-            logError(e, 'AltTabWindows: failed to bind backward keybinding');
+            logError(e, 'AppSwitcher: failed to bind backward keybinding');
         }
     }
 
     disable() {
+        log('AppSwitcher: disabling extension');
         this._closePopup();
-        try { Main.wm.removeKeybinding('forward'); } catch (e) {}
-        try { Main.wm.removeKeybinding('backward'); } catch (e) {}
+        
+        try { 
+            Main.wm.removeKeybinding('forward'); 
+            log('AppSwitcher: forward keybinding removed');
+        } catch (e) { 
+            logError(e, 'AppSwitcher: failed to remove forward keybinding');
+        }
+        
+        try { 
+            Main.wm.removeKeybinding('backward'); 
+            log('AppSwitcher: backward keybinding removed');
+        } catch (e) { 
+            logError(e, 'AppSwitcher: failed to remove backward keybinding');
+        }
+        
+        // Принудительно сбрасываем клавиши к заводским настройкам GNOME
         this._restoreSystemKeybindings();
 
         this._settings = null;
         this._popup = null;
         this._systemKeySettings = null;
         this._savedSystemKeybindings = null;
+        
+        log('AppSwitcher: extension disabled successfully');
     }
 
     _closePopup() {
@@ -605,9 +625,16 @@ export default class AltTabWindowsExtension extends Extension {
 
     _getOwnAccelerators() {
         try {
-            const accels = [...this._settings.get_strv('forward'), ...this._settings.get_strv('backward')];
-            return new Set(accels.filter(a => a && a.trim()).map(a => a.toLowerCase()));
+            const forward = this._settings.get_strv('forward');
+            const backward = this._settings.get_strv('backward');
+            log(`AppSwitcher: own forward: ${JSON.stringify(forward)}, backward: ${JSON.stringify(backward)}`);
+            
+            const accels = [...forward, ...backward];
+            const set = new Set(accels.filter(a => a && a.trim()).map(a => a.toLowerCase()));
+            log(`AppSwitcher: own accelerators set: ${JSON.stringify(Array.from(set))}`);
+            return set;
         } catch (e) {
+            logError(e, 'AppSwitcher: failed to get own accelerators');
             return new Set();
         }
     }
@@ -616,15 +643,24 @@ export default class AltTabWindowsExtension extends Extension {
         try {
             this._systemKeySettings = new Gio.Settings({ schema_id: SYSTEM_KEYBINDING_SCHEMA });
         } catch (e) {
+            logError(e, 'AppSwitcher: failed to create system keybindings settings');
             return;
         }
 
         const ownAccelerators = this._getOwnAccelerators();
-        if (!ownAccelerators.size) return;
+        if (!ownAccelerators.size) {
+            log('AppSwitcher: no own accelerators to check for conflicts');
+            return;
+        }
+
+        log(`AppSwitcher: checking ${CONFLICTING_SYSTEM_KEYS.length} system keys for conflicts`);
 
         for (const key of CONFLICTING_SYSTEM_KEYS) {
             try {
-                if (!this._systemKeySettings.settings_schema.has_key(key)) continue;
+                if (!this._systemKeySettings.settings_schema.has_key(key)) {
+                    continue;
+                }
+                
                 const original = this._systemKeySettings.get_strv(key);
                 const filtered = original.filter(a => {
                     if (!a || !a.trim()) return true;
@@ -632,26 +668,34 @@ export default class AltTabWindowsExtension extends Extension {
                 });
 
                 if (filtered.length !== original.length) {
+                    log(`AppSwitcher: saving original for ${key}: [${original.join(', ')}]`);
                     this._savedSystemKeybindings.set(key, original);
                     this._systemKeySettings.set_strv(key, filtered);
+                    this._systemKeySettings.apply();
+                    log(`AppSwitcher: cleared conflicting keybinding ${key}`);
+                } else {
+                    log(`AppSwitcher: no conflicts for ${key} (original: [${original.join(', ')}])`);
                 }
             } catch (e) {
-                logError(e, `AltTabWindows: failed to clear conflicting keybinding ${key}`);
+                logError(e, `AppSwitcher: failed to clear conflicting keybinding ${key}`);
             }
         }
     }
 
     _restoreSystemKeybindings() {
-        if (!this._systemKeySettings || !this._savedSystemKeybindings) return;
-        for (const [key, value] of this._savedSystemKeybindings) {
-            try {
-                if (this._systemKeySettings.settings_schema.has_key(key)) {
-                    this._systemKeySettings.set_strv(key, value);
+        log('AppSwitcher: forcefully resetting system keybindings to GNOME defaults');
+        try {
+            const sysSettings = new Gio.Settings({ schema_id: SYSTEM_KEYBINDING_SCHEMA });
+            for (const key of CONFLICTING_SYSTEM_KEYS) {
+                if (sysSettings.settings_schema.has_key(key)) {
+                    log(`AppSwitcher: resetting ${key} to schema default`);
+                    sysSettings.reset(key);
                 }
-            } catch (e) {
-                logError(e, `AltTabWindows: failed to restore keybinding ${key}`);
             }
+            sysSettings.apply();
+            log('AppSwitcher: system keybindings reset complete');
+        } catch (e) {
+            logError(e, 'AppSwitcher: failed to reset system keybindings');
         }
-        this._savedSystemKeybindings.clear();
     }
 }
