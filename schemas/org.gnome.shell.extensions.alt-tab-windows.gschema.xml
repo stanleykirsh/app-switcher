@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.app-switcher"
+          path="/org/gnome/shell/extensions/app-switcher/">
+
+    <key name="forward" type="as">
+      <default><![CDATA[['<Alt>Tab']]]></default>
+      <summary>Show window switcher</summary>
+      <description>Shortcut to open the window switcher and move forward.</description>
+    </key>
+
+    <key name="backward" type="as">
+      <default><![CDATA[['<Shift><Alt>Tab']]]></default>
+      <summary>Show window switcher backwards</summary>
+      <description>Shortcut to open the window switcher and move backward.</description>
+    </key>
+
+    <key name="override-default-alt-tab" type="b">
+      <default>true</default>
+      <summary>Temporarily disable conflicting built-in switchers</summary>
+      <description>
+        If enabled, the extension will temporarily remove conflicting GNOME Shell
+        keybindings while it is enabled and restore them when disabled.
+      </description>
+    </key>
+
+    <key name="current-workspace-only" type="b">
+      <default>true</default>
+      <summary>Current workspace only</summary>
+      <description>Show only windows from the current workspace.</description>
+    </key>
+
+    <key name="include-minimized" type="b">
+      <default>true</default>
+      <summary>Include minimized windows</summary>
+      <description>Include minimized windows in the switcher.</description>
+    </key>
+
+    <key name="thumbnail-width" type="i">
+      <default>280</default>
+      <summary>Thumbnail width</summary>
+      <description>Requested preview width in logical pixels.</description>
+    </key>
+
+    <key name="thumbnail-height" type="i">
+      <default>180</default>
+      <summary>Thumbnail height</summary>
+      <description>Requested preview height in logical pixels.</description>
+    </key>
+
+  </schema>
+</schemalist>

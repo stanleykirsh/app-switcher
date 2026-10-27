@@ -1,0 +1,56 @@
+.alttab-overlay {
+    background-color: rgba(0, 0, 0, 0.30);
+}
+
+.alttab-window-switcher {
+    background-color: rgba(24, 24, 28, 0.92);
+    border-radius: 18px;
+    padding: 18px;
+    spacing: 12px;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.alttab-scroll {
+    background-color: transparent;
+}
+
+.alttab-grid {
+    spacing: 16px;
+}
+
+.alttab-window-item {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 14px;
+    padding: 10px;
+    spacing: 8px;
+    border-width: 2px;
+    border-color: transparent;
+}
+
+.alttab-window-item.selected {
+    background-color: rgba(255, 255, 255, 0.16);
+    border-color: rgba(120, 174, 237, 0.9);
+}
+
+.alttab-thumbnail {
+    background-color: rgba(0, 0, 0, 0.35);
+    border-radius: 10px;
+}
+
+.alttab-title-box {
+    spacing: 8px;
+}
+
+.alttab-title {
+    font-size: 10pt;
+    color: #f2f2f2;
+}
+
+.alttab-app-icon {
+    icon-size: 24px;
+}
+
+.alttab-fallback-icon {
+    icon-size: 72px;
+}
