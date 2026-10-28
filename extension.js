@@ -44,6 +44,8 @@ class WindowSwitcherPopup extends St.Widget {
         this._keyReleaseId = 0;
         this._pollTimeoutId = 0;
         this._showTime = 0;
+        this._workAreaWidth = 0;
+        this._workAreaHeight = 0;
 
         this._container = new St.BoxLayout({
             style_class: 'alttab-window-switcher',
@@ -58,7 +60,7 @@ class WindowSwitcherPopup extends St.Widget {
             x_align: Clutter.ActorAlign.CENTER,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        
+
         const flowLayout = new Clutter.FlowLayout({
             orientation: Clutter.Orientation.HORIZONTAL,
             homogeneous: false,
@@ -81,8 +83,15 @@ class WindowSwitcherPopup extends St.Widget {
             return;
         }
 
+        const monitor = Main.layoutManager.currentMonitor;
+        const workArea = Main.layoutManager.getWorkAreaForMonitor(monitor.index);
+
+        this._workAreaWidth = workArea.width;
+        this._workAreaHeight = workArea.height;
+
         Main.uiGroup.add_child(this);
-        this.set_size(global.stage.width, global.stage.height);
+        this.set_position(workArea.x, workArea.y);
+        this.set_size(workArea.width, workArea.height);
 
         this._buildItems();
 
@@ -110,11 +119,11 @@ class WindowSwitcherPopup extends St.Widget {
 
         this._pollTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
             if (this._destroyed) return GLib.SOURCE_REMOVE;
-            
+
             if (GLib.get_monotonic_time() - this._showTime < 200000) {
                 return GLib.SOURCE_CONTINUE;
             }
-            
+
             if (!this._isAnyModifierDown()) {
                 this._finish(true);
                 return GLib.SOURCE_REMOVE;
@@ -178,8 +187,8 @@ class WindowSwitcherPopup extends St.Widget {
         this._items = [];
         this._selectedIndex = -1;
 
-        const maxThumbWidth = Math.floor(global.stage.width * 0.30);
-        const maxThumbHeight = Math.floor(global.stage.height * 0.30);
+        const maxThumbWidth = Math.floor(this._workAreaWidth * 0.30);
+        const maxThumbHeight = Math.floor(this._workAreaHeight * 0.30);
 
         this._thumbWidth = Math.max(192, Math.min(this._settings.get_int('thumbnail-width'), maxThumbWidth));
         this._thumbHeight = Math.max(120, Math.min(this._settings.get_int('thumbnail-height'), maxThumbHeight));
@@ -195,7 +204,7 @@ class WindowSwitcherPopup extends St.Widget {
                 reactive: true,
                 can_focus: true,
             });
-            
+
             const itemLayout = new Clutter.BoxLayout({
                 orientation: Clutter.Orientation.VERTICAL,
             });
@@ -329,7 +338,7 @@ class WindowSwitcherPopup extends St.Widget {
     _updateLayoutWidth() {
         const spacing = 20;
         const containerPadding = 56;
-        const maxTotalWidth = Math.floor(global.stage.width * 0.92);
+        const maxTotalWidth = Math.floor(this._workAreaWidth * 0.92);
         const availableGridWidth = maxTotalWidth - containerPadding;
 
         const maxAvailableCols = Math.max(1, Math.floor((availableGridWidth + spacing) / (this._itemWidth + spacing)));
@@ -346,7 +355,7 @@ class WindowSwitcherPopup extends St.Widget {
             columns = Math.ceil(this._items.length / 2);
             columns = Math.min(columns, maxCols);
             rows = Math.ceil(this._items.length / columns);
-            
+
             if (rows > 3) {
                 columns = maxCols;
                 rows = Math.ceil(this._items.length / columns);
@@ -436,7 +445,7 @@ class WindowSwitcherPopup extends St.Widget {
         const mask = Clutter.ModifierType.MODIFIER_MASK &
                      ~Clutter.ModifierType.LOCK_MASK &
                      ~Clutter.ModifierType.MOD2_MASK;
-                     
+
         if ((mods & mask) === 0) {
             this._finish(true);
             return Clutter.EVENT_STOP;
@@ -488,7 +497,7 @@ class WindowSwitcherPopup extends St.Widget {
 
         const selected = this._items[this._selectedIndex] ?? null;
         const windowToActivate = activate ? selected?.window : null;
-        
+
         const timestamp = global.get_current_time();
 
         this.destroy();
@@ -535,10 +544,8 @@ class WindowSwitcherPopup extends St.Widget {
 
 export default class AltTabWindowsExtension extends Extension {
     enable() {
-        log('AppSwitcher: enabling extension');
         this._settings = this.getSettings();
         this._popup = null;
-        this._savedSystemKeybindings = new Map();
         this._systemKeySettings = null;
 
         if (this._settings.get_boolean('override-default-alt-tab')) {
@@ -553,9 +560,8 @@ export default class AltTabWindowsExtension extends Extension {
                 Shell.ActionMode.NORMAL,
                 () => this._showPopup(false)
             );
-            log('AppSwitcher: forward keybinding added');
         } catch (e) {
-            logError(e, 'AppSwitcher: failed to bind forward keybinding');
+            logError(e, 'AltTabWindows: failed to bind forward keybinding');
         }
 
         try {
@@ -566,39 +572,23 @@ export default class AltTabWindowsExtension extends Extension {
                 Shell.ActionMode.NORMAL,
                 () => this._showPopup(true)
             );
-            log('AppSwitcher: backward keybinding added');
         } catch (e) {
-            logError(e, 'AppSwitcher: failed to bind backward keybinding');
+            logError(e, 'AltTabWindows: failed to bind backward keybinding');
         }
     }
 
     disable() {
-        log('AppSwitcher: disabling extension');
         this._closePopup();
-        
-        try { 
-            Main.wm.removeKeybinding('forward'); 
-            log('AppSwitcher: forward keybinding removed');
-        } catch (e) { 
-            logError(e, 'AppSwitcher: failed to remove forward keybinding');
+        try { Main.wm.removeKeybinding('forward'); } catch (e) {}
+        try { Main.wm.removeKeybinding('backward'); } catch (e) {}
+
+        if (this._settings && this._settings.get_boolean('override-default-alt-tab')) {
+            this._restoreSystemKeybindings();
         }
-        
-        try { 
-            Main.wm.removeKeybinding('backward'); 
-            log('AppSwitcher: backward keybinding removed');
-        } catch (e) { 
-            logError(e, 'AppSwitcher: failed to remove backward keybinding');
-        }
-        
-        // Принудительно сбрасываем клавиши к заводским настройкам GNOME
-        this._restoreSystemKeybindings();
 
         this._settings = null;
         this._popup = null;
         this._systemKeySettings = null;
-        this._savedSystemKeybindings = null;
-        
-        log('AppSwitcher: extension disabled successfully');
     }
 
     _closePopup() {
@@ -625,16 +615,9 @@ export default class AltTabWindowsExtension extends Extension {
 
     _getOwnAccelerators() {
         try {
-            const forward = this._settings.get_strv('forward');
-            const backward = this._settings.get_strv('backward');
-            log(`AppSwitcher: own forward: ${JSON.stringify(forward)}, backward: ${JSON.stringify(backward)}`);
-            
-            const accels = [...forward, ...backward];
-            const set = new Set(accels.filter(a => a && a.trim()).map(a => a.toLowerCase()));
-            log(`AppSwitcher: own accelerators set: ${JSON.stringify(Array.from(set))}`);
-            return set;
+            const accels = [...this._settings.get_strv('forward'), ...this._settings.get_strv('backward')];
+            return new Set(accels.filter(a => a && a.trim()).map(a => a.toLowerCase()));
         } catch (e) {
-            logError(e, 'AppSwitcher: failed to get own accelerators');
             return new Set();
         }
     }
@@ -643,59 +626,53 @@ export default class AltTabWindowsExtension extends Extension {
         try {
             this._systemKeySettings = new Gio.Settings({ schema_id: SYSTEM_KEYBINDING_SCHEMA });
         } catch (e) {
-            logError(e, 'AppSwitcher: failed to create system keybindings settings');
             return;
         }
 
         const ownAccelerators = this._getOwnAccelerators();
-        if (!ownAccelerators.size) {
-            log('AppSwitcher: no own accelerators to check for conflicts');
-            return;
-        }
-
-        log(`AppSwitcher: checking ${CONFLICTING_SYSTEM_KEYS.length} system keys for conflicts`);
+        if (!ownAccelerators.size) return;
 
         for (const key of CONFLICTING_SYSTEM_KEYS) {
             try {
-                if (!this._systemKeySettings.settings_schema.has_key(key)) {
-                    continue;
-                }
-                
-                const original = this._systemKeySettings.get_strv(key);
-                const filtered = original.filter(a => {
-                    if (!a || !a.trim()) return true;
-                    return !ownAccelerators.has(a.toLowerCase());
-                });
+                if (!this._systemKeySettings.settings_schema.has_key(key)) continue;
 
-                if (filtered.length !== original.length) {
-                    log(`AppSwitcher: saving original for ${key}: [${original.join(', ')}]`);
-                    this._savedSystemKeybindings.set(key, original);
-                    this._systemKeySettings.set_strv(key, filtered);
-                    this._systemKeySettings.apply();
-                    log(`AppSwitcher: cleared conflicting keybinding ${key}`);
-                } else {
-                    log(`AppSwitcher: no conflicts for ${key} (original: [${original.join(', ')}])`);
+                const savedKey = `saved-${key}`;
+                const current = this._systemKeySettings.get_strv(key);
+                const effective = current.filter(a => a && a.trim());
+
+                if (effective.length > 0) {
+                    this._settings.set_strv(savedKey, current);
+                    this._systemKeySettings.set_strv(key, []);
                 }
             } catch (e) {
-                logError(e, `AppSwitcher: failed to clear conflicting keybinding ${key}`);
+                logError(e, `AltTabWindows: failed to clear conflicting keybinding ${key}`);
             }
         }
     }
 
     _restoreSystemKeybindings() {
-        log('AppSwitcher: forcefully resetting system keybindings to GNOME defaults');
-        try {
-            const sysSettings = new Gio.Settings({ schema_id: SYSTEM_KEYBINDING_SCHEMA });
-            for (const key of CONFLICTING_SYSTEM_KEYS) {
-                if (sysSettings.settings_schema.has_key(key)) {
-                    log(`AppSwitcher: resetting ${key} to schema default`);
-                    sysSettings.reset(key);
-                }
+        if (!this._systemKeySettings) {
+            try {
+                this._systemKeySettings = new Gio.Settings({ schema_id: SYSTEM_KEYBINDING_SCHEMA });
+            } catch (e) {
+                return;
             }
-            sysSettings.apply();
-            log('AppSwitcher: system keybindings reset complete');
-        } catch (e) {
-            logError(e, 'AppSwitcher: failed to reset system keybindings');
+        }
+
+        for (const key of CONFLICTING_SYSTEM_KEYS) {
+            try {
+                if (!this._systemKeySettings.settings_schema.has_key(key)) continue;
+
+                const savedKey = `saved-${key}`;
+                const saved = this._settings.get_strv(savedKey);
+
+                if (saved && saved.length > 0) {
+                    this._systemKeySettings.set_strv(key, saved);
+                    this._settings.set_strv(savedKey, []);
+                }
+            } catch (e) {
+                logError(e, `AltTabWindows: failed to restore keybinding ${key}`);
+            }
         }
     }
 }

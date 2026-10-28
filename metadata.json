@@ -1,7 +1,7 @@
 {
   "uuid": "app-switcher@local",
-  "name": "App Switcher (Windows-like Alt+Tab)",
-  "description": "Windows-like Alt+Tab: one item per window, large thumbnails, no app grouping.",
+  "name": "App Switcher",
+  "description": "Alt+Tab: one item per window, large thumbnails, no app grouping.",
   "shell-version": [
     "45",
     "46",
