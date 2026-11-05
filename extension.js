@@ -18,6 +18,46 @@ const CONFLICTING_SYSTEM_KEYS = [
     'switch-applications-backward',
 ];
 
+// Порог быстрого переключения (в микросекундах)
+const FAST_SWITCH_THRESHOLD_US = 120000; // 120 мс
+
+function getWindows(settings) {
+    const currentOnly = settings.get_boolean('current-workspace-only');
+    const includeMinimized = settings.get_boolean('include-minimized');
+    const activeWorkspace = global.workspace_manager.get_active_workspace();
+
+    let windows = [];
+
+    try {
+        if (currentOnly) {
+            windows = global.display.get_tab_list(Meta.TabList.NORMAL, activeWorkspace) || [];
+        } else {
+            const type = Meta.TabList.NORMAL_ALL ?? Meta.TabList.NORMAL;
+            windows = global.display.get_tab_list(type, null) || [];
+        }
+    } catch (e) {
+        if (currentOnly) {
+            windows = activeWorkspace.list_windows();
+        } else {
+            windows = global.get_window_actors()
+                .map(a => {
+                    if (a.meta_window) return a.meta_window;
+                    if (typeof a.get_meta_window === 'function') return a.get_meta_window();
+                    return null;
+                })
+                .filter(w => w);
+            windows.sort((a, b) => b.get_user_time() - a.get_user_time());
+        }
+    }
+
+    return windows.filter(w => {
+        if (!w || w.is_skip_taskbar()) return false;
+        if (w.get_window_type() !== Meta.WindowType.NORMAL) return false;
+        if (!includeMinimized && w.minimized) return false;
+        return true;
+    });
+}
+
 const WindowSwitcherPopup = GObject.registerClass(
 class WindowSwitcherPopup extends St.Widget {
     _init(settings) {
@@ -76,7 +116,7 @@ class WindowSwitcherPopup extends St.Widget {
     }
 
     show(backward) {
-        this._windows = this._getWindows();
+        this._windows = getWindows(this._settings);
 
         if (!this._windows.length) {
             this.destroy();
@@ -117,17 +157,23 @@ class WindowSwitcherPopup extends St.Widget {
 
         this.grab_key_focus();
 
-        this._pollTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+        this._pollTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 30, () => {
             if (this._destroyed) return GLib.SOURCE_REMOVE;
 
-            if (GLib.get_monotonic_time() - this._showTime < 200000) {
-                return GLib.SOURCE_CONTINUE;
+            try {
+                const [x, y, mods] = global.get_pointer();
+                const mask = Clutter.ModifierType.MODIFIER_MASK &
+                             ~Clutter.ModifierType.LOCK_MASK &
+                             ~Clutter.ModifierType.MOD2_MASK;
+                
+                if ((mods & mask) === 0) {
+                    this._finish(true);
+                    return GLib.SOURCE_REMOVE;
+                }
+            } catch (e) {
+                // ignore
             }
-
-            if (!this._isAnyModifierDown()) {
-                this._finish(true);
-                return GLib.SOURCE_REMOVE;
-            }
+            
             return GLib.SOURCE_CONTINUE;
         });
     }
@@ -142,43 +188,6 @@ class WindowSwitcherPopup extends St.Widget {
 
         this._lastSwitchTime = now;
         this._selectRelative(backward ? -1 : 1);
-    }
-
-    _getWindows() {
-        const currentOnly = this._settings.get_boolean('current-workspace-only');
-        const includeMinimized = this._settings.get_boolean('include-minimized');
-        const activeWorkspace = global.workspace_manager.get_active_workspace();
-
-        let windows = [];
-
-        try {
-            if (currentOnly) {
-                windows = global.display.get_tab_list(Meta.TabList.NORMAL, activeWorkspace) || [];
-            } else {
-                const type = Meta.TabList.NORMAL_ALL ?? Meta.TabList.NORMAL;
-                windows = global.display.get_tab_list(type, null) || [];
-            }
-        } catch (e) {
-            if (currentOnly) {
-                windows = activeWorkspace.list_windows();
-            } else {
-                windows = global.get_window_actors()
-                    .map(a => {
-                        if (a.meta_window) return a.meta_window;
-                        if (typeof a.get_meta_window === 'function') return a.get_meta_window();
-                        return null;
-                    })
-                    .filter(w => w);
-                windows.sort((a, b) => b.get_user_time() - a.get_user_time());
-            }
-        }
-
-        return windows.filter(w => {
-            if (!w || w.is_skip_taskbar()) return false;
-            if (w.get_window_type() !== Meta.WindowType.NORMAL) return false;
-            if (!includeMinimized && w.minimized) return false;
-            return true;
-        });
     }
 
     _buildItems() {
@@ -437,33 +446,39 @@ class WindowSwitcherPopup extends St.Widget {
     _onKeyRelease(actor, event) {
         if (this._destroyed) return Clutter.EVENT_PROPAGATE;
 
-        if (GLib.get_monotonic_time() - this._showTime < 150000) {
-            return Clutter.EVENT_PROPAGATE;
-        }
+        const symbol = event.get_key_symbol();
+        
+        // Список клавиш-модификаторов, отпускание которых завершает переключение
+        const finishSymbols = [
+            Clutter.KEY_Alt_L, Clutter.KEY_Alt_R,
+            Clutter.KEY_Meta_L, Clutter.KEY_Meta_R,
+            Clutter.KEY_Super_L, Clutter.KEY_Super_R,
+            Clutter.KEY_Hyper_L, Clutter.KEY_Hyper_R,
+            Clutter.KEY_ISO_Level3_Shift,
+        ];
 
-        const [x, y, mods] = global.get_pointer();
-        const mask = Clutter.ModifierType.MODIFIER_MASK &
-                     ~Clutter.ModifierType.LOCK_MASK &
-                     ~Clutter.ModifierType.MOD2_MASK;
-
-        if ((mods & mask) === 0) {
+        if (finishSymbols.includes(symbol)) {
             this._finish(true);
             return Clutter.EVENT_STOP;
         }
 
-        return Clutter.EVENT_PROPAGATE;
-    }
-
-    _isAnyModifierDown() {
+        // Fallback: проверяем глобальное состояние модификаторов
+        // На случай если символ не совпал (например, другая раскладка)
         try {
             const [x, y, mods] = global.get_pointer();
             const mask = Clutter.ModifierType.MODIFIER_MASK &
                          ~Clutter.ModifierType.LOCK_MASK &
                          ~Clutter.ModifierType.MOD2_MASK;
-            return (mods & mask) !== 0;
+            
+            if ((mods & mask) === 0) {
+                this._finish(true);
+                return Clutter.EVENT_STOP;
+            }
         } catch (e) {
-            return false;
+            // ignore
         }
+
+        return Clutter.EVENT_PROPAGATE;
     }
 
     _onWindowRemoved(win) {
@@ -547,18 +562,29 @@ export default class AltTabWindowsExtension extends Extension {
         this._settings = this.getSettings();
         this._popup = null;
         this._systemKeySettings = null;
+        
+        // Переменные для отслеживания быстрого нажатия
+        this._fastSwitchTimerId = 0;
+        this._pendingDirection = false;
+        this._stageKeyPressId = 0;
+        this._stageKeyReleaseId = 0;
 
         if (this._settings.get_boolean('override-default-alt-tab')) {
             this._disableConflictingSystemKeybindings();
         }
 
+        // Вместо addKeybinding мы слушаем события напрямую на stage,
+        // чтобы иметь полный контроль над временем реакции.
+        // Но чтобы не ломать другие хоткеи, мы используем addKeybinding для регистрации,
+        // но внутри него будем решать, что делать.
+        
         try {
             Main.wm.addKeybinding(
                 'forward',
                 this._settings,
                 Meta.KeyBindingFlags.NONE,
                 Shell.ActionMode.NORMAL,
-                () => this._showPopup(false)
+                () => this._handleSwitchRequest(false)
             );
         } catch (e) {
             logError(e, 'AltTabWindows: failed to bind forward keybinding');
@@ -570,7 +596,7 @@ export default class AltTabWindowsExtension extends Extension {
                 this._settings,
                 Meta.KeyBindingFlags.NONE,
                 Shell.ActionMode.NORMAL,
-                () => this._showPopup(true)
+                () => this._handleSwitchRequest(true)
             );
         } catch (e) {
             logError(e, 'AltTabWindows: failed to bind backward keybinding');
@@ -578,6 +604,11 @@ export default class AltTabWindowsExtension extends Extension {
     }
 
     disable() {
+        if (this._fastSwitchTimerId) {
+            GLib.source_remove(this._fastSwitchTimerId);
+            this._fastSwitchTimerId = 0;
+        }
+
         this._closePopup();
         try { Main.wm.removeKeybinding('forward'); } catch (e) {}
         try { Main.wm.removeKeybinding('backward'); } catch (e) {}
@@ -596,6 +627,65 @@ export default class AltTabWindowsExtension extends Extension {
             this._popup.destroy();
             this._popup = null;
         }
+    }
+
+    _handleSwitchRequest(backward) {
+        // Если попап уже есть, просто переключаем
+        if (this._popup) {
+            this._popup.handleSwitch(backward);
+            return;
+        }
+
+        // Если таймер уже запущен, просто обновляем направление
+        if (this._fastSwitchTimerId) {
+            this._pendingDirection = backward;
+            return;
+        }
+
+        // Запускаем таймер ожидания
+        this._pendingDirection = backward;
+        this._fastSwitchTimerId = GLib.timeout_add(
+            GLib.PRIORITY_HIGH,
+            Math.floor(FAST_SWITCH_THRESHOLD_US / 1000),
+            () => {
+                this._fastSwitchTimerId = 0;
+                
+                // Проверяем, отпущен ли Alt к этому моменту
+                // Используем прямой опрос состояния клавиш через XInput/Wayland API, если доступно,
+                // но в JS у нас только get_pointer. 
+                // Однако, главное преимущество здесь в том, что мы ЖДЕМ перед созданием попапа.
+                
+                // Попробуем проверить состояние еще раз
+                const [x, y, mods] = global.get_pointer();
+                const mask = Clutter.ModifierType.MODIFIER_MASK &
+                             ~Clutter.ModifierType.LOCK_MASK &
+                             ~Clutter.ModifierType.MOD2_MASK;
+                
+                if ((mods & mask) === 0) {
+                    // Мгновенное переключение
+                    this._instantSwitch(this._pendingDirection);
+                } else {
+                    // Показываем попап
+                    this._showPopup(this._pendingDirection);
+                }
+                
+                return GLib.SOURCE_REMOVE;
+            }
+        );
+    }
+
+    _instantSwitch(backward) {
+        const windows = getWindows(this._settings);
+        if (!windows.length) return;
+
+        let nextIndex;
+        if (backward) {
+            nextIndex = windows.length - 1;
+        } else {
+            nextIndex = windows.length > 1 ? 1 : 0;
+        }
+
+        Main.activateWindow(windows[nextIndex], global.get_current_time());
     }
 
     _showPopup(backward) {
